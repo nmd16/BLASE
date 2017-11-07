@@ -2,6 +2,7 @@
 ##  Read User Inputs   ##
 ## %%%%%%%%%%%%%%%%%%% ## 
 
+# Put the specific name of the input file you want here
 source("Inputs.R") 
 
 if( class(MCMCSeed) != "numeric"){
