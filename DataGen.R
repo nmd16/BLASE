@@ -13,7 +13,7 @@ require(reshape2)
 ##      Load the Data     ## 
 ## %%%%%%%%%%%%%%%%%%%%%% ## 
 
-ml <- read.dta("http://www.ats.ucla.edu/stat/data/hsbdemo.dta")
+ml <- read.csv("ml.csv")
 
 ## %%%%%%%%%%%%%%%%%%%%%% ## 
 ##      Load Functions    ## 
