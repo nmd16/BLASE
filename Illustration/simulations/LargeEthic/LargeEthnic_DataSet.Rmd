@@ -1,0 +1,351 @@
+Working with the 3 Largest Ethnicities 
+========================================================
+
+Limit our exploration to just the three largest ethnicities: White, Black and Hispanic.  
+
+```{r}
+#Generate the Data 
+set.seed(120937094)
+
+#########################################
+#From here below the steps are up to date
+#########################################
+
+BDay2011 = WholeThing[,"birthdt2011"]
+BDay2012 = WholeThing[,"birthdt"]
+
+AllDays11 = as.numeric( format( as.Date(BDay2011, "%m/%d/%Y"), format = "%d" ))
+AllDays12 = as.numeric( format( as.Date(BDay2012, "%m/%d/%Y"), format = "%d" ))
+
+# Bind on the Day Columns 
+WholeThing = cbind( WholeThing,birthday2011 = AllDays11, birthday2012 = AllDays12 )
+
+# Chose only the individuals with ethnicities W, H, or B 
+
+which.Large11 = c(which(WholeThing$ethnic2011 %in% c("W","B","H")))
+which.Large12 = which(WholeThing$ethnic %in% c("W","B","H"))
+
+Diff.11.12 = setdiff(which.Large11,which.Large12)
+Diff.12.11 = setdiff(which.Large12,which.Large11)
+
+which.LargeBoth = intersect(which.Large11,which.Large12)
+
+Data = WholeThing[which.LargeBoth,]
+
+N = nrow(Data)
+
+# NOTE: sch11 and sch12 are the combined school and lea variables
+# Concatenate the strings to create the new variable 
+#sch11 = paste(WholeThing[,"lea2011"],WholeThing[,"schlcode2011"],sep="")
+#sch12 = paste(WholeThing[,"lea"],WholeThing[,"schlcode"],sep="")
+
+# Bind the two new variables onto WholeThing
+WholeThing = cbind( WholeThing, sch11,sch12)
+
+# Relevel some 
+Data[,"sch11"] = factor(Data[,"sch11"])
+Data[,"sch12"] = factor(Data[,"sch12"])
+Data[,"lea2011"] = factor(Data[,"lea2011"])
+Data[,"lea"] = factor(Data[,"lea"])
+
+Data[,"ethnic2011"] = relevel(Data$ethnic2011,ref="W")
+Data[,"ethnic"] = relevel(Data$ethnic,ref="W")
+
+Data[,"ethnic2011"] = factor(Data$ethnic2011)
+Data$ethnic = factor(Data$ethnic)
+
+
+```
+
+Let's look at the model we want to use.
+
+```{r}
+
+Cmathscal = Data$mathscal - mean(Data$mathscal)
+YearInd   = as.numeric(Data$birthyear >= 1996)
+
+ModelCheck = lm( Data[,"mathscal2011"] ~ Cmathscal + sex2011*ethnic2011, data = Data)
+
+C11mathscal = Data$mathscal2011 - mean(Data$mathscal2011)
+ModelNew = lm( C11mathscal ~ Cmathscal + sex2011*ethnic2011, data = Data)
+
+summary(ModelCheck)
+
+Bind = (Data$ethnic2011 == "B")
+ModelNew2 = lm( Data[,"mathscal2011"] ~ Cmathscal + sex2011*Bind, data = Data)
+
+anova(ModelNew2,ModelCheck)
+
+
+ModelNew3 = lm( C11mathscal ~ Cmathscal*sex2011 + sex2011*ethnic2011, data = Data)
+ModelNew4 = lm( C11mathscal ~ Cmathscal*sex2011+ Cmathscal*ethnic2011+ sex2011*ethnic2011, data = Data)
+
+BSet= subset(Data,Data$ethnic2011=="B")
+WSet= subset(Data,Data$ethnic2011=="W")
+HSet= subset(Data,Data$ethnic2011=="H")
+
+boxplot(BSet[,"mathscal"]-BSet[,"mathscal2011"],WSet[,"mathscal"]-WSet[,"mathscal2011"],HSet[,"mathscal"]-HSet[,"mathscal2011"])
+
+plot(BSet[,"mathscal"]-BSet[,"mathscal2011"])
+summary(BSet[,"mathscal"]-BSet[,"mathscal2011"])
+lm(mathscal2011~mathscal+ sex2011, data= BSet)
+lm(mathscal2011~mathscal+ sex2011, data= HSet)
+lm(mathscal2011~mathscal+ sex2011, data= WSet)
+
+truthModel = ModelNew3
+truthCoefs = ModelNew3$coefficients
+
+# Fit a secondary model 
+
+Model1A = lm( Cmathscal ~ sex*ethnic , data = File2012)
+
+summary(Model1A)
+
+truthSecondary = Model1A
+
+```
+
+What we notice from the above is that the difference with Year has vanished. What that means is that the Year difference that we saw before much have only related to a few ethnicities, none of which were W,B or H. 
+ModelNew3 = lm( C11mathscal ~ Cmathscal + sex2011 + ethnic2011, data = Data)
+
+### Blocks = True Data  
+
+Now we begin to move down to the blocking variables.
+
+```{r}
+
+bvars <- c("birthday","birthmonth","birthyear","ethnicity","sex","school")
+
+B11 = Data[,c("birthday2011","birthmonth2011","birthyear2011","ethnic2011","sex2011","sch11")]
+B12 = Data[,c("birthday2012","birthmonth","birthyear","ethnic","sex","sch12")]
+
+# Because the column names have to be the same in order for us to bind columns, we conver the names 
+B12.holder = B12
+colnames(B12.holder) = colnames(B11)
+B = rbind( B11, B12.holder)
+colnames(B) = bvars
+
+# Store the levels associated with each variable
+d = c()
+
+# Levels for Birthday: 31 
+d[1] = length( unique(B[,1]) )
+
+# Levels for Birth Month : 12
+d[2] = length( unique(B[,2]) )
+
+# Levels for BirthYear: 
+d[3] = length( unique(B[,3]) )
+
+# Levels for Ethnicity : 3
+d[4] = length( levels(B[,4]) )
+
+# Levels for Sex: 2 
+d[5] = length( levels(B[,5]) )
+
+# Levels for School: 
+d[6] = length( unique(B[,6]) )
+
+  
+```
+
+
+Now that we have the blocking variables, we can assign each record to a block based on the values of the blocking variables. 
+
+```{r}
+
+category.block<- function(x,p,d){
+  x = as.numeric(x)
+  category=0
+  for (j in 1:(p-1)) category=category+prod( d[(j+1):p])*(x[j]-1)
+  category = category+x[p]
+  return(category)
+}
+
+# Note that the below takes some time to run! 
+
+blocks = NULL
+for( i in 1:(2*N)){
+  blocks[i] = category.block(B[i,],length(d),d)
+}
+
+blocks1 = blocks[1:N]
+blocks2 = blocks[(N+1):(2*N)]
+```
+
+The code above takes each record and assigns it an index. The index tells us which of these possible blocks is assigned to each record based on the observed values of the blocking variables $\hat{B}$.
+
+As a simplification, we will not allow for the creation of new blocks during this method. The only blocks that are allowed are blocks that are observed in the original data. This is necessary because of these vast number of possible blocks; this space is too large to effectively explore.  
+
+Because of this simplification, we convert the indices from the step above into "blocks". The smallest unique index that it is observed in $\hat{B}$ becomes the first block, and so on. 
+
+
+```{r}
+Block_Ops = c( blocks1, blocks2)
+Index_to_Block = Legal_Index = sort( unique( Block_Ops ) )
+Block_Ops  = as.numeric(as.factor(Block_Ops))
+indices1 <- blocks1
+indices2 <-blocks2
+blocks1 <-Block_Ops[1:N]
+blocks2 <- Block_Ops[(N+1):(2*N)]
+```
+
+We recall that we are working with records from two different Files--2011 and 2012. For clarity, we assume that the records from 2011 are in the correct block, and only records from 2012 may be in error. 
+
+We recall from the GAZM approach that the size of the blocks is important. Right now, the maximum number of records per block is 4. 
+
+```{r}
+table(table(blocks))
+
+table(table(blocks1))
+
+table(table(blocks2))
+```
+
+We now get an overall picture of block size by sorting the records into their blocks by File. If we have 3 records from File 2011 in a block and 4 from File 2012, we have a possible 4 unique individuals in the block. This gives us an idea of how well the baseline method will perform. We recall that the Gutman algorithm, the foundation of this work, is reliant upon the assumption that the sizes of the blocks involved are tiny. This allows the algorithm to more effectively explore the possible linking structures within each block.  
+
+```{r}
+# We have 86342 filled blocks 
+K = length(unique(blocks))
+
+# Storage: How many records in each block?  
+n.RIB = matrix( NA, nrow = 2, ncol = K )
+#Storage: Which records in each block? 
+RIB      = vector( "list", length = 2 )
+RIB[[1]] = vector( "list", length = K )
+RIB[[2]] = vector( "list", length = K )
+
+for(k in 1:K){
+    RIB[[1]][[k]] <- which(blocks1==k)
+    RIB[[2]][[k]] <- which(blocks2==k)
+} 
+
+n.RIB[1,] <-sapply(RIB[[1]],length)
+
+n.RIB[2,] <-sapply(RIB[[2]],length)
+
+block.size <- apply(n.RIB,2,max)
+
+table(block.size)
+```
+
+We can see that we don't have an issue with block size, which means both GM and BLASE should do fine. 
+
+Now, we have to save the true data space, and then introduce errors. 
+
+```{r}
+
+# What are the original seeds? 
+
+# Which blocks contain exactly 1 pair? 
+Singletons = which(block.size==1)
+
+# Which records from 2012 are assigned these blocks?
+type1Seeds.truth = which( blocks1==blocks2 & blocks2 %in% Singletons)
+
+table(Data[type1Seeds.truth,"ethnic"])
+table(Data[,"ethnic2011"])
+table(Data[-type1Seeds.truth,"ethnic2011"])
+
+```
+
+Now we want to start formatting this to actually look like a data set. 
+
+```{r}
+
+bvars = c("bday","bmonth","byear","sex","ethnic","school")
+File2011 = Data[,c(11,25,2:3,8,9,23,6)]
+File2012 = Data[,c(22,26,13:14,19:20,24,17)]
+colnames(File2011) = c("mathscal",bvars,"lea")
+colnames(File2012) = c("mathscal",bvars,"lea")
+
+rownames(File2012) = 1:nrow(File2012)
+rownames(File2011) = 1:nrow(File2011)
+
+# Center the File2012 math score
+Cmathscal = File2012$mathscal - mean(File2012$mathscal)
+File2012[,1] = Cmathscal
+colnames(File2012)[1] = "Cmathscal"
+
+# Center the File2011 math score
+#Cmathscal = File2011$mathscal - mean(File2011$mathscal)
+#File2011[,1] = Cmathscal
+#colnames(File2012)[1] = "Cmathscal"
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%% # 
+# Convert to Factors   
+# %%%%%%%%%%%%%%%%%%%%%%%%%% #
+
+File2011[,"bday"] = factor(File2011[,"bday"])
+File2012[,"bday"] = factor(File2012[,"bday"])
+
+File2011[,"bmonth"] = factor(File2011[,"bmonth"])
+File2012[,"bmonth"] = factor(File2012[,"bmonth"])
+
+File2011[,"byear"] = factor(File2011[,"byear"])
+File2012[,"byear"] = factor(File2012[,"byear"])
+
+rm(HSet,WSet,WholeThing,AllDay11,AllDays12,BDay2011,BDay2102,BDmatch,Model1A,ModelCheck, ModelCheck1,ModelNew,ModelNew2,SchOnly,School_NMatch,Sex_Nmatch, sch11,sch12) 
+
+setwd("N:/Simulations/LargeEthnic")
+save.image("TruthData.RData")
+
+
+```
+
+### Introducing Error 
+
+## Introduce Errors
+
+We need to introduce errors in Ethnicity. 
+
+```{r}
+set.seed(9292015)
+
+# How many type 1 seeds?
+# Roughly 80%
+
+# So, we can only have up to 20% error.
+
+## %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% ##
+##     Introduce The Errors           ## 
+## %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% ##   
+
+Error.Options =  setdiff( 1:N, c(type1Seeds.truth,Race_Nmatch))
+error.perc = 20
+in.error       = sample( Error.Options, N*error.perc/100, replace = F)
+rm(Error.Options)
+
+error.fields = "ethnic"
+error.file = 2 
+field.options = levels(Data[,error.fields])
+fields.probs = table(Data[,"ethnic"])/N
+
+for( i in in.error){
+  
+  if( error.file == 1 ){
+    current.field   = File1[ i ,error.fields]
+    field.choices   = setdiff( field.options,current.field )
+    File1[i,"prog"] = sample(field.choices,1)
+  } else{ 
+    current.field   = File2012[ i ,error.fields]
+    field.choices   = setdiff( field.options,current.field )
+    which.field = which(field.options==current.field)
+    probs.here = fields.probs[-which.field]
+    probs.here = fields.probs[-which.field]/sum(probs.here)
+    File2012[i,error.fields]=sample(field.choices,1,prob=fields.probs[-which.field])
+  }
+    
+}
+
+sum(File2011[,"ethnic"]!= File2012[,"ethnic"])/N
+# 20% 
+
+table(File2012[-type1Seeds.truth,"ethnic"])
+table(File2011[-type1Seeds.truth,"ethnic"])
+
+type1Seeds = type1Seeds.truth
+n.type1 = length(type1Seeds)
+
+save.image("DataWithError.RData")
+```
