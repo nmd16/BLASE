@@ -1,0 +1,192 @@
+Prepping the Data 
+========================================================
+
+## Possible Move Spaces  
+
+For now, we want to get an overall idea of the size of the blocks that each individual can move to. 
+
+```{r}
+# How many type 1 seeds do we have? 
+
+how_many_possible<-function( B.new, N, d, field, NumVars, type1seeds, Legal_Index, blocks){
+  
+  # Checking for possible block moves
+  
+  SchoolLevel = B.new[,field]
+  #SchoolLevel = as.numeric(as.factor(SchoolLevel))
+  
+  # This part is fixed and fed in 
+  check.gap.1 = category.block( c(1,1,1,1,1,1), NumVars, d)
+  check.gap.2 = category.block( c(1,1,1,1,1,2), NumVars, d)
+  check.gap   = check.gap.2 - check.gap.1
+  school.levels = d[field]
+  add.vec   = cumsum( rep(check.gap,school.levels-1))
+  
+  possible.out = rep(0,N)
+  
+  a = 1 
+  
+  for( i in 1:N ){
+    
+    i = i + N 
+    
+    print(i)
+    
+    if( a %in% type1seeds){
+      possible.out[a] = 0 
+    } else{ 
+      # which index are we in? 
+      x = blocks[i]
+      # which level of school? 
+      s = which(levels(SchoolLevel)==SchoolLevel[i])
+      #SchoolLevel[i] 
+    
+      up.move   = school.levels - s
+      down.move = s -1 
+      
+      up.check  = x + add.vec[1:up.move]
+      if(down.move > 0){
+        down.check  = x - add.vec[1:down.move]
+      }else{
+        down.check = NULL 
+      }
+      
+      # Now, we check to see which of these are legal indices
+      
+      possible.moves = c(up.check, down.check)
+      possible.moves = intersect(possible.moves,Legal_Index)
+      possible.moves = length(possible.moves)
+      
+      possible.out[a] = possible.moves 
+    } 
+    
+    a = a + 1 
+    
+  }
+  
+  return(possible.out)
+  
+  
+}
+
+N = nrow(Data)
+
+possoutN = how_many_possible(B,N,d,field=6,NumVars=6,type1Seeds,Legal_Index,blocks)
+```
+
+Basically, the above function looks at all the possible school values that we COULD propose for a given record, and examines which of these would be accepted as legal moves. 
+
+If the space of possible moves is small, then we might consider some sort of alternative. I want to try a few ways of doing this and see what happens. 
+
+Note that the above code is structured to only check for moves for File 2 records. We make the assumption in this simulation that File 1 is correct. This is logical, because really we are more concerned about the matches than the correction.  
+
+```{r}
+# Which records have a possible block to move to, other than their own? 
+nonzero = possoutN[which(possoutN>0)]
+# On average, how many possible moves do we have for records that have at least one?
+summary( nonzero )
+#How many records can move? 
+length(nonzero)
+#Take a look at the number of moves in a table
+table(nonzero)
+# Plot
+hist(nonzero)
+```
+
+The real issue that we see here is the number of possible moves. Some of these records can move to over 70 different blocks. That's a huge number to try and explore. The probabilities at that point also start to get very tiny, so sampling the probability using the DP is going to be potentially problematic. 
+
+We should also consider the records which have no options. 
+```{r}
+
+zero.only = which(possoutN==0)
+non.only  = which(possoutN>0)
+# Some of these are seeds. 
+zero.only = setdiff(zero.only,type1Seeds)
+length(zero.only)
+
+# Check: These should be the same  
+N - n.type1  
+sum(length(zero.only)+length(non.only))
+
+which(blocks1[zero.only] != blocks2[zero.only])
+# In this case, it means we are off by a field other than school. 
+
+# These records are already in the correct block, and they can't move. Type 2 seeds :) 
+
+Seeds[zero.only] = 2
+
+Data = WholeThing
+
+save.image("AllDataSpace.RData")
+
+```
+
+## Introduce Errors
+
+We need to introduce errors in Ethnicity. 
+
+```{r}
+set.seed(9292015)
+
+# How many type 1 seeds?
+ n.type1/N
+# Roughly 80%
+
+# So, we can only have up to 20% error. Let's try 15%. 
+
+## %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% ##
+##     Introduce The Errors           ## 
+## %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% ##   
+
+set.seed(104957389)
+Data = WholeThing
+Data[,"ethnic"]= factor(Data[,"ethnic"])
+Data[,"ethnic2011"]= factor(Data[,"ethnic2011"])
+
+Error.Options =  setdiff( 1:N, c(type1Seeds,Race_Nmatch))
+error.perc = 15
+in.error       = sample( Error.Options, N*error.perc/100, replace = F)
+rm(Error.Options)
+
+Data <- within(Data, ethnic<-relevel(ethnic, ref = 6))
+Data <- within(Data, ethnic2011<-relevel(ethnic2011, ref = 6))
+
+error.fields = "ethnic"
+error.file = 2 
+field.options = levels(Data[,error.fields])
+fields.probs = table(Data[,"ethnic"])/N
+
+for( i in in.error){
+  
+  if( error.file == 1 ){
+    current.field   = File1[ i ,error.fields]
+    field.choices   = setdiff( field.options,current.field )
+    File1[i,"prog"] = sample(field.choices,1)
+  } else{ 
+    current.field   = Data[ i ,error.fields]
+    field.choices   = setdiff( field.options,current.field )
+    which.field = which(field.options==current.field)
+    probs.here = fields.probs[-which.field]
+    probs.here = fields.probs[-which.field]/sum(probs.here)
+    Data[i,error.fields]=sample(field.choices,1,prob=fields.probs[-which.field])
+  }
+    
+}
+
+sum(Data[,"ethnic2011"]!=Data[,"ethnic"])/N
+
+table(Data[-type1Seeds,"ethnic"])
+table(Data[-type1Seeds,"ethnic2011"])
+```
+
+## Removing the Superfluous 
+
+At this point, we have things that we do not actually need in this data space. We can remove those. They are stored in "DataSpace.RData" if we need them later. 
+
+```{r}
+
+rm(B12.holder, WholeThing, AllDays11, AllDays12, BDNmatch, BDay2011, BDay2012, BDmatch, Day_Diff, DisagreePool, G.K, Imp.Holder1, Imp.Holder2, Month_Diff, NonEmpty, NumVars, PI, Race_Nmatch, Race_match, SchOnly, SchoolLevel, School_Nmatch, School_match, SeedPool,SeedsOnly, Sex_Nmatch, Singletons, ToRemove, ToRemoveErrors, Year11, Year12, Year_Diff, block.size, check.gap, check.gap.1, check.gap.2, down.move, field, i, inError, k, s, sch11, sch12, school.levels, up.move, x, zero.only, School_Nmatch, School_match, Sex_NMatch, Sex_match, possout, possible.out,small11,small12,smallEither,smallLEA,non.only,nonzero)
+
+save.image("NewErrorData_Unformatted.RData")
+
+```
